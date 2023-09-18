@@ -22,7 +22,7 @@ pipeline {
             }
         }
 
-        stage(Set Up Parameters) {
+        stage('Set Up Parameters') {
             steps {
                 script {
                     def branch = sh(script: "cat ${WORKSPACE}/Branch.txt | grep '^branch=' | cut -d'=' -f2", returnStdout: true).trim()
