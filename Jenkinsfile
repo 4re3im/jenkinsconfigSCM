@@ -2,11 +2,6 @@ pipeline {
     agent {
         label "built-in"
     }
-    parameters {
-        string(name: 'BRANCH', defaultValue: 'jenkins-branch-01', description: 'Branch')
-        string(name: 'REPO_URL', defaultValue: 'git@github.com:4re3im/JenkinsTest.git', description: 'Repository URL')
-    }
-
     options {
         skipDefaultCheckout()
     }
@@ -17,12 +12,39 @@ pipeline {
                 cleanWs()
             }
         }
+        stage('Checkout Jenkins Config') {
+            steps {
+                script {
+                    sshagent(['sshgit']) {
+                        git branch 'main', credentialsId: 'sshgit', url: 'git@github.com:4re3im/jenkinsconfig.git'
+                    }
+                }
+            }
+        }
+
+        stage(Set Up Parameters) {
+            steps {
+                script {
+                    def branch = sh(script: "cat ${WORKSPACE}/Branch.txt | grep '^branch=' | cut -d'=' -f2", returnStdout: true).trim()
+                    def repo_url = sh(script: "cat ${WORKSPACE}/Branch.txt | grep '^giturl=' | cut -d'=' -f2", returnStdout: true).trim()
+                   
+                    env.BRANCH = branch
+                    env.REPO_URL = repo_url
+                }
+            }
+        }
+        
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
 
         stage('Checkout') {
             steps {
                 script {
                     sshagent(['sshgit']) {
-                        git branch: "${params.BRANCH}", credentialsId: 'sshgit', url: params.REPO_URL
+                        git branch: "${BRANCH}", credentialsId: 'sshgit', url: "${REPO_URL}"
                     }
                 }
             }
@@ -109,7 +131,7 @@ pipeline {
                         echo "Start Merge to Main"
 
                         // Clone the repository to a temporary directory
-                        sh "git clone ${params.REPO_URL} temp"
+                        sh "git clone ${REPO_URL} temp"
 
                         // Change to the cloned directory
                         dir('temp') {
@@ -124,7 +146,7 @@ pipeline {
                             sh 'git fetch --all'
 
                             // Merge the specified branch into main with "theirs" strategy
-                            def mergeResult = sh(script: "git merge -Xtheirs --no-ff origin/${params.BRANCH}", returnStatus: true)
+                            def mergeResult = sh(script: "git merge -Xtheirs --no-ff origin/${BRANCH}", returnStatus: true)
 
                             // Check the merge result and take appropriate action
                             if (mergeResult == 0) {
