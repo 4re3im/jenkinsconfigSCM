@@ -16,7 +16,7 @@ pipeline {
             steps {
                 script {
                     sshagent(['sshgit']) {
-                        git branch 'main', credentialsId: 'sshgit', url: 'git@github.com:4re3im/jenkinsconfig.git'
+                        git branch: 'main', credentialsId: 'sshgit', url: 'git@github.com:4re3im/jenkinsconfig.git'
                     }
                 }
             }
