@@ -1,6 +1,6 @@
-pipeline {
+ pipeline {
     agent {
-        label "built-in"
+        label "ecs"
     }
     options {
         skipDefaultCheckout()
