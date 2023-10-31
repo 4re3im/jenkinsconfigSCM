@@ -91,18 +91,31 @@ pipeline {
                 input message: 'Approval to Copy from S3', submitter: 'Dom AWS Admins'
             }
         }
-        stage ('Download RPM from S3') {
-                agent {
-                 label 'cloud-agent-1'
-            }
-            steps {
-                script {
-                    // Set your AWS credentials here if needed
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
-                    sh "aws s3 cp s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm $WORKSPACE/RPMS/noarch/ --region eu-west-1"
+        stage ('RPM') {
+            parallel {
+                stage ('Downloading RPM from S3') {
+                    agent {
+                        label 'cloud-agent-1'
+                    }
+                    steps {
+                        script {
+                            withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
+                            sh "aws s3 cp s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm $WORKSPACE/RPMS/noarch/ --region eu-west-1"    
+                            }
+                        }
+                        
+                    } 
+            
+                }
+                stage ('Donwloading RPM for transfer') {
+                    agent {
+                        label 'built-in'
+                    }
+                    steps {
+                        echo 'Transfering RPM to other server'
                     }
                 }
             }
         }
     }
-}
+}        
