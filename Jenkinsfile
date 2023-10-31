@@ -1,58 +1,39 @@
- pipeline {
-    agent {
-        label "ecs"
-    }
+pipeline {
+    agent none
+    
     options {
         skipDefaultCheckout()
     }
 
     stages {
-        stage('Initial Clean Workspace') {
-            steps {
-                cleanWs()
-            }
-        }
-        stage('Checkout Jenkins Config') {
+        stage('Build Package') {
+            agent {
+                label "cloud-agent-1"
+            }  
             steps {
                 script {
-                    sshagent(['sshgit']) {
-                        git branch: 'main', credentialsId: 'sshgit', url: 'git@github.com:4re3im/jenkinsconfig.git'
+                    sh '''
+                    mkdir -p "${WORKSPACE}/jenkinsconfig"
+                    '''
+                    dir("${WORKSPACE}/jenkinsconfig") {
+                        sshagent(['sshgithub']) {
+                            git branch: 'main', credentialsId: 'sshgithub', url: 'git@github.com:4re3im/jenkinsconfig.git'
+                        }
                     }
-                }
-            }
-        }
 
-        stage('Set Up Parameters') {
-            steps {
-                script {
-                    def branch = sh(script: "cat ${WORKSPACE}/Branch.txt | grep '^branch=' | cut -d'=' -f2", returnStdout: true).trim()
-                    def repo_url = sh(script: "cat ${WORKSPACE}/Branch.txt | grep '^giturl=' | cut -d'=' -f2", returnStdout: true).trim()
-                   
+                    def branch = sh(script: "cat ${WORKSPACE}/jenkinsconfig/Branch.txt | grep '^branch=' | cut -d'=' -f2", returnStdout: true).trim()
+                    def repo_url = sh(script: "cat ${WORKSPACE}/jenkinsconfig/Branch.txt | grep '^giturl=' | cut-d'=' -f2", returnStdout: true).trim()
+                    
                     env.BRANCH = branch
                     env.REPO_URL = repo_url
-                }
-            }
-        }
-        
-        stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
-        }
+                    
+                    echo "BRANCH: ${env.BRANCH}"
+                    echo "REPO_URL: ${env.REPO_URL}"
 
-        stage('Checkout') {
-            steps {
-                script {
-                    sshagent(['sshgit']) {
-                        git branch: "${BRANCH}", credentialsId: 'sshgit', url: "${REPO_URL}"
+                    sshagent(['sshgithub']) {
+                        git branch: env.BRANCH, credentialsId: 'sshgithub', url: env.REPO_URL
                     }
-                }
-            }
-        }
 
-        stage('Read Version and Package') {
-            steps {
-                script {
                     def version = sh(script: "cat ${WORKSPACE}/version.txt | grep '^version=' | cut -d'=' -f2", returnStdout: true).trim()
                     def packageName = sh(script: "cat ${WORKSPACE}/version.txt | grep '^package=' | cut -d'=' -f2", returnStdout: true).trim()
 
@@ -61,15 +42,9 @@
 
                     echo "Version: ${env.VERSION}"
                     echo "Package: ${env.PACKAGE_NAME}"
-                }
-            }
-        }
 
-        stage('Prepare Files') {
-            steps {
-                script {
                     sh '''
-                    #!/bin/bash
+                    #!/bash/bin
 
                     # Enable error-sensitive shell
                     set -e
@@ -88,13 +63,7 @@
                     cp -rp $WORKSPACE/SPEC/. SPECS
                     find SPECS -name .git | sed -e 's/^://' -e 's/$//' | xargs rm -rf
                     '''
-                }
-            }
-        }
 
-        stage('Create RPM Package') {
-            steps {
-                script {
                     sh '''
                     #!/bin/bash
 
@@ -103,71 +72,41 @@
 
                     rpmbuild --define "_version ${VERSION}" --define "_release $BUILD_NUMBER" --define "_topdir $WORKSPACE" -bb SPECS/${PACKAGE_NAME}.spec
                     '''
-                }
-            }
-        }
 
-        stage ('Approval to push to S3') {
-            steps {
-                input message: 'Approval', submitter: 'read'
-            }
-        }
-
-        stage('Push to S3') {
-            steps {
-                script {
-                    // Use AWS CLI to upload the ZIP file to S3 using stored credentials
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'f022a85a-84f2-4cf6-a1c0-eaf0a5720f1e']]) {
-                        sh "aws s3 cp $WORKSPACE/RPMS/noarch/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm s3://jenkins-bnr/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm --region ap-southeast-1"
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
+                        sh "aws s3 cp $WORKSPACE/RPMS/noarch/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm --region eu-west-1"
                     }
                 }
             }
         }
-
-        stage('Merge to Main') {
+        stage ('Copy RPM from S3') {
+            agent {
+                label 'built-in'
+            }
+            steps {
+                input message: 'Approval to Copy from S3', submitter: 'Dom AWS Admins'
+            }
+        }
+        stage ('Download RPM from S3') {
+            agent {
+                label 'cloud-agent-1'
+            }
             steps {
                 script {
-                    sshagent(['sshgit']) {
-                        echo "Start Merge to Main"
-
-                        // Clone the repository to a temporary directory
-                        sh "git clone ${REPO_URL} temp"
-
-                        // Change to the cloned directory
-                        dir('temp') {
-                            // Initialize a new Git repository
-                            sh 'git init'
-
-                            // Set Git user.name and user.email configurations
-                            sh "git config user.name 'Rainielle Maglaya'"
-                            sh "git config user.email 'rainielle.maglaya@cambridge.org'"
-
-                            // Fetch all remote branches
-                            sh 'git fetch --all'
-
-                            // Merge the specified branch into main with "theirs" strategy
-                            def mergeResult = sh(script: "git merge -Xtheirs --no-ff origin/${BRANCH}", returnStatus: true)
-
-                            // Check the merge result and take appropriate action
-                            if (mergeResult == 0) {
-                                echo "Merge successful."
-                            } else {
-                                echo "Merge conflict detected. Attempting to resolve..."
-                                // Resolve merge conflicts here
-                                sh 'git status'
-                                sh 'git diff'
-                                // Use 'git checkout' or other commands to resolve conflicts
-                                // After resolving conflicts, commit the changes
-                                sh 'git commit -m "Resolve merge conflicts"'
-                            }
-
-                            // Push the changes to the repository's main branch
-                            sh 'git push origin main'
-                        }
-
-                        // Clean up the temporary directory
-                        sh 'rm -rf temp'
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
+                        sh "aws s3 cp s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm $WORKSPACE/RPMS/noarch/ --region eu-west-1"
                     }
+                }
+            }
+        }
+        parallel {
+            stage('Download RPM for Backup') {
+                agent {
+                    label 'built-in'
+                }
+                steps {
+                    echo 'Downloading RPM for Backup...'
+                    // Add any backup steps here
                 }
             }
         }
