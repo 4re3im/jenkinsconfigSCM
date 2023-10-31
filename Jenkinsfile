@@ -1,10 +1,5 @@
 pipeline {
     agent none
-    
-    options {
-        skipDefaultCheckout()
-    }
-
     stages {
         stage('Build Package') {
             agent {
@@ -35,7 +30,7 @@ pipeline {
                     }
 
                     def version = sh(script: "cat ${WORKSPACE}/version.txt | grep '^version=' | cut -d'=' -f2", returnStdout: true).trim()
-                    def packageName = sh(script: "cat ${WORKSPACE}/version.txt | grep '^package=' | cut -d'=' -f2", returnStdout: true).trim()
+                    def packageName = sh(script: "cat ${WORKSPACE}/version.txt | grep '^package=' | cut-d'=' -f2", returnStdout: true).trim()
 
                     env.VERSION = version
                     env.PACKAGE_NAME = packageName
@@ -73,6 +68,7 @@ pipeline {
                     rpmbuild --define "_version ${VERSION}" --define "_release $BUILD_NUMBER" --define "_topdir $WORKSPACE" -bb SPECS/${PACKAGE_NAME}.spec
                     '''
 
+                    // Push to S3
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
                         sh "aws s3 cp $WORKSPACE/RPMS/noarch/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm --region eu-west-1"
                     }
@@ -88,25 +84,27 @@ pipeline {
             }
         }
         stage ('Download RPM from S3') {
-            agent {
-                label 'cloud-agent-1'
-            }
-            steps {
-                script {
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
-                        sh "aws s3 cp s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm $WORKSPACE/RPMS/noarch/ --region eu-west-1"
+            parallel {
+                stage('Download RPM') {
+                    agent {
+                        label 'cloud-agent-1'
+                    }
+                    steps {
+                        script {
+                            withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY', credentialsId: 'AWS-BONP']]) {
+                                sh "aws s3 cp s3://bnr-jenkins/package-repository/${PACKAGE_NAME}-${VERSION}-${BUILD_NUMBER}.noarch.rpm $WORKSPACE/RPMS/noarch/ --region eu-west-1"
+                            }
+                        }
                     }
                 }
-            }
-        }
-        parallel {
-            stage('Download RPM for Backup') {
-                agent {
-                    label 'built-in'
-                }
-                steps {
-                    echo 'Downloading RPM for Backup...'
-                    // Add any backup steps here
+                stage('Download RPM for Backup') {
+                    agent {
+                        label 'built-in'
+                    }
+                    steps {
+                        echo 'Downloading RPM for Backup...'
+                        // Add any backup steps here
+                    }
                 }
             }
         }
