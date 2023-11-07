@@ -18,7 +18,7 @@ pipeline {
                     '''
                     dir("${WORKSPACE}/jenkinsconfig") {
                         sshagent(['sshgithub']) {
-                            git branch: 'main', credentialsId: 'sshgithub', url: 'git@github.com:4re3im/jenkinsconfig.git'
+                            git branch: 'main', credentialsId: 'sshgithub', url: 'git@github.com:4re3im/jenkinsconfigSCM.git'
                         }
                     }
 
