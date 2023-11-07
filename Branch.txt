@@ -1,2 +1,2 @@
 branch=SCM-branch-01
-giturl=git@github.com:4re3im/JenkinsTest.git
+giturl=git@github.com:4re3im/SCMTest.git
